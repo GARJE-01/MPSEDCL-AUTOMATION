@@ -88,13 +88,14 @@ if search_term:
   if matches.empty:
     st.error("No matching site found.")
   else:
+
+    def format_site_label(idx):
+      addr = str(matches.loc[idx, "Site Address"]).strip()
+      host = str(matches.loc[idx, "Host Name"]).strip()
+      return f"{addr}  -->  {host}"
+
     selected_idx = st.selectbox(
-        "Select Site:",
-        matches.index,
-        format_func=lambda i: (
-            f"{matches.loc[i, 'Site Address']}  -->  {matches.loc[i, 'Host"
-            " Name']}"
-        ),
+        "Select Site:", matches.index, format_func=format_site_label
     )
     row = matches.loc[selected_idx]
 
