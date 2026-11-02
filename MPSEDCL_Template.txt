@@ -1,0 +1,229 @@
+
+=====
+!! Take input from Excel/Email.:
+
+Host Name = AIR_MARKFED_DAMOH
+Site Address = MARKFED_DAMOH
+Local contact Network eng = MRS. Varsha 7725856340
+
+LSI No = 14723385
+RA no = 3067991
+
+WAN IP PE end = 172.49.111.13/30
+WAN IP CPE = 172.49.111.14/30
+LAN IP = 172.17.117.128/27
+
+!! Calculate these from LAN Subnet 
+172.17.117.129 - 172.17.117.158
+172.17.117.159 = broadcast
+255.255.255.224
+
+=====
+!! Router Console Access
+
+Username: admin 
+Password: admin 
+
+Enter new Password: admin 
+Confirm Password: admin 
+
+Router# 
+
+pnpa service discovery stop 
+
+!! Wait for few minutes before doing the next commands:
+
+config-transaction
+
+hostname <hostname>
+
+interface GigabitEthernet 0/0/1
+no vrf forwarding
+!! Change IP Address & Subnet Mask
+ip add 172.52.134.170 255.255.255.252
+no shutdown
+bandwidth 10000
+exit
+
+
+
+ip domain name MPSEDCL 
+
+!! LOCAL DB:
+
+username airtel privilege 15 password Airtel@123
+username cisco privilege 15 password cisco
+enable password cisco
+clock timezone IST 5 30
+aaa new-model
+
+aaa authentication login CONSOLE local 
+
+line con 0
+login authentication CONSOLE 
+logging sync 
+exit
+
+line vty 0 4
+ transport input telnet ssh
+ login authentication CONSOLE 
+ logging sync 
+exit
+
+line vty 5 80
+ transport input telnet ssh
+ login authentication CONSOLE 
+ logging sync 
+exit
+
+
+!!!!
+
+!! Change the Next-Hop of WAN-1
+ip route 0.0.0.0 0.0.0.0 172.52.134.169
+
+router bgp 65001
+bgp log-neighbor-changes
+
+!! Change the Neighbor to be WAN-1 Next-Hop
+neighbor 172.52.134.169 remote-as 9730
+
+address-family ipv4
+redistribute connected
+redistribute static
+
+!! Change the Neighbor to be WAN-1 Next-Hop
+neighbor 172.52.134.169 activate
+
+!! Change the Neighbor to be WAN-1 Next-Hop
+neighbor 172.52.134.169 allowas-in 6
+
+exit
+exit
+
+
+interface Vlan1 
+no vrf forwarding
+
+!! LAN Subnet + 1, IP Address
+ip add 172.17.249.65 255.255.255.240
+
+no shut 
+exit  
+
+interface Gi 0/1/0
+switchport mode access 
+switchport access vlan 1
+exit 
+
+interface Gi 0/1/1
+switchport mode access 
+switchport access vlan 1
+exit 
+
+interface Gi 0/1/2
+switchport mode access 
+switchport access vlan 1
+exit 
+
+interface Gi 0/1/3
+switchport mode access 
+switchport access vlan 1
+exit 
+
+interface Gi 0/1/4
+switchport mode access 
+switchport access vlan 1
+exit 
+
+interface Gi 0/1/5
+switchport mode access 
+switchport access vlan 1
+exit 
+
+!! The IP present in Vlan-01
+ip dhcp excluded-address 172.17.249.65 172.17.249.65
+
+!! LAN - <Vlan-01 IP Address>
+ip dhcp pool LAN-172.17.249.65
+
+!! LAN Network ID + Subnet Mask 
+ network 172.17.249.64 255.255.255.240
+
+!! LAN - Vlan-01 IP Address
+ default-router 172.17.249.65
+exit 
+
+snmp-server community swantulip RO
+snmp-server host 10.124.4.126 version 2c swantulip
+
+
+ip sla 1
+
+!! WAN-1 Interface IP Address
+icmp-jitter 10.124.4.47 source-ip 172.52.134.170
+
+frequency 600
+threshold 80
+timeout 1000
+ip sla schedule 1 life forever start-time now
+
+commit
+
+exit
+
+crypto key gen rsa gen mod 2048
+
+=====
+
+show ip route 10.124.4.47
+
+show ip bgp 10.124.4.47 
+
+ping 10.124.4.47
+
+!!
+
+terminal len 0
+
+show running-config 
+
+show ip bgp sum 
+
+show ip int br 
+
+show vlan br 
+
+show vrf 
+
+show ip route connected 
+
+show mac address-table dynamic 
+
+show mac address-table static 
+
+show ip arp | exc Incomplete
+
+show version 
+
+show platform 
+
+show install summary 
+
+show bootvar
+
+show romvar
+
+show inventory 
+
+show clock detail
+
+show vlan br
+
+show ip ssh 
+
+show crypto key my rsa
+
+terminal no len 0
+
+====
