@@ -9,7 +9,7 @@ from datetime import datetime
 st.set_page_config(page_title="MPSWAN Config Generator", layout="wide")
 
 # Replace with your deployed Google Apps Script URL
-APPS_SCRIPT_URL = st.secrets.get("APPS_SCRIPT_URL", "PASTE_YOUR_APPS_SCRIPT_URL_HERE")
+APPS_SCRIPT_URL = st.secrets.get("https://script.google.com/macros/s/AKfycbyQiZryKLGqJMRw0QlRdSwSCmJY82lYXeiblINyG-HA1LQKXBpCvdyTcmmsV_STGvqy8g/exec")
 
 def parse_bandwidth_kbps(bw_val):
     if pd.isna(bw_val):
