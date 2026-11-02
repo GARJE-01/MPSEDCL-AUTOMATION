@@ -9,7 +9,7 @@ import streamlit as st
 st.set_page_config(page_title="MPSWAN Config Automation", layout="wide")
 
 # Deployed Google Apps Script Web App URL
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwTOMwPX41Dd1_H1vzCRij7iS2CJnKABx8znesk7AaPrE-rQwwFtXq8OLlDQQIM3YQ/exec"
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyQiZryKLGqJMRw0QlRdSwSCmJY82lYXeiblINyG-HA1LQKXBpCvdyTcmmsV_STGvqy8g/exec"
 
 
 def parse_bandwidth_kbps(bw_val):
@@ -25,7 +25,7 @@ def render_mpsedcl_config(data_dict):
   wan_cpe_raw = str(data_dict["wan_cpe"]).strip()
   lan_raw = str(data_dict["lan_ip"]).strip()
 
-  # Auto-append /30 if user only typed plain IP without prefix
+  # Auto-append /30 if user typed plain IP without prefix
   if "/" not in wan_pe_raw:
     wan_pe_raw += "/30"
   if "/" not in wan_cpe_raw:
@@ -96,22 +96,26 @@ def render_mpsedcl_config(data_dict):
 
 def push_to_online_sheet(payload):
   """Sends row details to Google Apps Script Webhook."""
-  with st.spinner("Connecting to Online Google Sheet..."):
+  with st.spinner("Verifying headers and syncing to Online Google Sheet..."):
     try:
-      res = requests.post(APPS_SCRIPT_URL, json=payload, timeout=20)
+      clean_payload = {k: str(v).strip() for k, v in payload.items() if v}
+      res = requests.post(APPS_SCRIPT_URL, json=clean_payload, timeout=20)
       if res.status_code == 200:
         try:
           res_json = res.json()
-          st.success(res_json.get("message", "Success!"))
+          if res_json.get("status") == "success":
+            st.success(f"✅ {res_json.get('message')}")
+          else:
+            st.error(f"⚠️ Sheet Error: {res_json.get('message')}")
         except ValueError:
-          st.success("Data pushed successfully.")
+          st.success("✅ Data pushed successfully.")
       else:
         st.error(
-            f"Error communicating with Google Sheet ({res.status_code}):"
-            f" {res.text}"
+            f"❌ Server Error ({res.status_code}): Could not communicate with"
+            " sheet."
         )
     except Exception as err:
-      st.error(f"Request failed: {err}")
+      st.error(f"❌ Connection Failed: {err}")
 
 
 st.title("⚡ MPSWAN Site Automation & Config Generator")
@@ -149,14 +153,14 @@ if search_query:
     st.error("No matching Site Address found in Excel sheet.")
   else:
 
-    def format_option(idx):
+    def format_site_option(idx):
       addr = str(matches.loc[idx, "Site Address"]).strip()
       dist = str(matches.loc[idx, "Dist"]).strip()
       tehsil = str(matches.loc[idx, "Tehsil/Block"]).strip()
       return f"{addr}  |  Dist: {dist}  |  Block: {tehsil}"
 
     selected_idx = st.selectbox(
-        "Select Matching Site:", matches.index, format_func=format_option
+        "Select Matching Site:", matches.index, format_func=format_site_option
     )
     row = matches.loc[selected_idx]
 
@@ -219,12 +223,12 @@ if search_query:
       in_wan_pe = st.text_input(
           "WAN IP PE end *",
           value=excel_wan_pe,
-          placeholder="e.g. 172.50.83.205/30 (or plain IP)",
+          placeholder="e.g. 172.50.83.205/30",
       )
       in_wan_cpe = st.text_input(
           "WAN IP CPE *",
           value=excel_wan_cpe,
-          placeholder="e.g. 172.50.83.206/30 (or plain IP)",
+          placeholder="e.g. 172.50.83.206/30",
       )
 
     # Optional local contact override
