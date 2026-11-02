@@ -6,7 +6,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-st.set_page_config(page_title="MPSWAN Config Generator", layout="wide")
+st.set_page_config(page_title="MPSWAN Config Automation", layout="wide")
 
 # Deployed Google Apps Script Web App URL
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyQiZryKLGqJMRw0QlRdSwSCmJY82lYXeiblINyG-HA1LQKXBpCvdyTcmmsV_STGvqy8g/exec"
@@ -20,10 +20,16 @@ def parse_bandwidth_kbps(bw_val):
 
 
 def render_mpsedcl_config(data_dict):
-  """Calculates IP subnet parameters and renders the MPSEDCL template."""
+  """Calculates IP subnet masks, gateways, broadcast and renders MPSEDCL template."""
   wan_pe_raw = str(data_dict["wan_pe"]).strip()
   wan_cpe_raw = str(data_dict["wan_cpe"]).strip()
   lan_raw = str(data_dict["lan_ip"]).strip()
+
+  # Auto-append /30 if user only typed plain IP without prefix
+  if "/" not in wan_pe_raw:
+    wan_pe_raw += "/30"
+  if "/" not in wan_cpe_raw:
+    wan_cpe_raw += "/30"
 
   wan_pe_iface = ipaddress.ip_interface(wan_pe_raw)
   wan_cpe_iface = ipaddress.ip_interface(wan_cpe_raw)
@@ -33,18 +39,16 @@ def render_mpsedcl_config(data_dict):
 
   context = {
       "host_name": str(data_dict["host_name"]).strip(),
-      "site_address": str(
-          data_dict.get("site_address", data_dict["host_name"])
-      ).strip(),
+      "site_address": str(data_dict.get("site_address", "")).strip(),
       "local_contact": str(data_dict.get("local_contact", "")).strip(),
       "lsi_no": str(data_dict.get("lsi_no", "")).strip(),
       "ra_no": str(data_dict.get("ra_no", "")).strip(),
-      "wan_pe_raw": wan_pe_raw,
-      "wan_cpe_raw": wan_cpe_raw,
+      "wan_pe_raw": str(wan_pe_iface),
+      "wan_cpe_raw": str(wan_cpe_iface),
       "wan_pe_ip": str(wan_pe_iface.ip),
       "wan_cpe_ip": str(wan_cpe_iface.ip),
       "wan_mask": str(wan_cpe_iface.netmask),
-      "lan_raw": lan_raw,
+      "lan_raw": str(lan_net),
       "lan_first_ip": str(hosts[0]),
       "lan_last_ip": str(hosts[-1]),
       "lan_broadcast_ip": str(lan_net.broadcast_address),
@@ -92,7 +96,7 @@ def render_mpsedcl_config(data_dict):
 
 def push_to_online_sheet(payload):
   """Sends row details to Google Apps Script Webhook."""
-  with st.spinner("Connecting to Google Sheet..."):
+  with st.spinner("Connecting to Online Google Sheet..."):
     try:
       res = requests.post(APPS_SCRIPT_URL, json=payload, timeout=20)
       if res.status_code == 200:
@@ -110,8 +114,9 @@ def push_to_online_sheet(payload):
       st.error(f"Request failed: {err}")
 
 
-st.title("⚡ MPSWAN Site Automation & Online Sync")
+st.title("⚡ MPSWAN Site Automation & Config Generator")
 
+# Load Excel File
 uploaded_file = st.sidebar.file_uploader(
     "Upload Site Master Sheet (.xlsx)", type=["xlsx"]
 )
@@ -123,262 +128,165 @@ try:
   df = pd.read_excel(excel_path, sheet_name="Sheet1")
 except Exception as e:
   st.warning(
-      "Please ensure 'MPSWAN MPLS Link TN 654-2.xlsx' is uploaded or present in"
-      " the repo."
+      "Please ensure 'MPSWAN MPLS Link TN 654-2.xlsx' is present or upload it."
   )
   st.stop()
 
-# Two Tabs: Auto (from Excel) vs Manual Mode
-tab_auto, tab_manual = st.tabs(
-    ["🔎 Search from Excel (Auto)", "✍️ Manual Entry Mode (Customer Provided)"]
+# 1. Search Site Address to match in Excel sheet
+search_query = st.text_input(
+    "🔍 Search Site Address in Excel Sheet:",
+    placeholder="e.g. MANDI_BURHANPUR, JOBAT, RAJNAGAR",
 )
 
-# ----------------- TAB 1: AUTO SEARCH -----------------
-with tab_auto:
-  search_term = st.text_input(
-      "🔍 Search Site Address or Hostname:",
-      placeholder="e.g. BUXWAHA, MAJHAULI",
-      key="auto_search",
-  )
+if search_query:
+  matches = df[
+      df["Site Address"]
+      .astype(str)
+      .str.contains(search_query, case=False, na=False)
+  ]
 
-  if search_term:
-    matches = df[
-        df["Site Address"]
-        .astype(str)
-        .str.contains(search_term, case=False, na=False)
-        | df["Host Name"]
-        .astype(str)
-        .str.contains(search_term, case=False, na=False)
-    ]
+  if matches.empty:
+    st.error("No matching Site Address found in Excel sheet.")
+  else:
 
-    if matches.empty:
-      st.error("No matching site found in Excel sheet.")
-    else:
+    def format_option(idx):
+      addr = str(matches.loc[idx, "Site Address"]).strip()
+      dist = str(matches.loc[idx, "Dist"]).strip()
+      tehsil = str(matches.loc[idx, "Tehsil/Block"]).strip()
+      return f"{addr}  |  Dist: {dist}  |  Block: {tehsil}"
 
-      def format_site_label(idx):
-        addr = str(matches.loc[idx, "Site Address"]).strip()
-        host = (
-            str(matches.loc[idx, "Host Name"]).strip()
-            if pd.notna(matches.loc[idx, "Host Name"])
-            else "NO HOSTNAME"
-        )
-        return f"{addr}  -->  {host}"
+    selected_idx = st.selectbox(
+        "Select Matching Site:", matches.index, format_func=format_option
+    )
+    row = matches.loc[selected_idx]
 
-      selected_idx = st.selectbox(
-          "Select Site:",
-          matches.index,
-          format_func=format_site_label,
-          key="auto_select",
+    # Pre-extracted details from Excel
+    site_address_val = str(row.get("Site Address", "")).replace("nan", "")
+    dist_val = str(row.get("Dist", "")).replace("nan", "")
+    tehsil_val = str(row.get("Tehsil/Block", "")).replace("nan", "")
+    bw_val = str(row.get("Bandwidth (In Mbps)", "10 MBPS")).replace(
+        "nan", "10 MBPS"
+    )
+    lsi_val = str(row.get("LSI No", "")).replace("nan", "")
+    ra_val = str(row.get("RA no", "")).replace("nan", "")
+    contact_val = str(row.get("Local contact Network eng", "")).replace(
+        "nan", ""
+    )
+
+    # Pre-fill defaults if present in Excel, otherwise empty for customer input
+    excel_host = str(row.get("Host Name", "")).replace("nan", "")
+    excel_wan_pe = str(row.get("WAN IP PE end", "")).replace("nan", "")
+    excel_wan_cpe = str(
+        row.get("WAN IP CPE\xa0", row.get("WAN IP CPE", ""))
+    ).replace("nan", "")
+    excel_lan = str(row.get("LAN IP\xa0", row.get("LAN IP", ""))).replace(
+        "nan", ""
+    )
+
+    st.markdown("---")
+    st.subheader(f"Site Metadata from Excel: `{site_address_val}`")
+
+    # Display read-only fetched info badges
+    m1, m2, m3, m4 = st.columns(4)
+    m1.info(f"**District:** {dist_val}")
+    m2.info(f"**Tehsil/Block:** {tehsil_val}")
+    m3.info(f"**Bandwidth:** {bw_val}")
+    m4.info(f"**RA No:** {ra_val if ra_val else 'Pending'}")
+
+    st.markdown("### ✍️ Customer-Provided Parameters")
+    st.caption(
+        "Enter the values supplied by the customer for this new branch:"
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+      in_hostname = st.text_input(
+          "Host Name *",
+          value=(
+              excel_host
+              if excel_host
+              else f"AIR_{site_address_val}".replace(" ", "_")
+          ),
+          placeholder="e.g. AIR_MANDI_BURHANPUR",
       )
-      row = matches.loc[selected_idx]
+      in_lan = st.text_input(
+          "LAN IP (with prefix/CIDR) *",
+          value=excel_lan,
+          placeholder="e.g. 172.21.159.0/27 or 172.17.214.80/28",
+      )
 
-      wan_pe_val = str(row.get("WAN IP PE end", "")).strip()
-      wan_cpe_val = str(
-          row.get("WAN IP CPE\xa0", row.get("WAN IP CPE", ""))
-      ).strip()
-      lan_val = str(row.get("LAN IP\xa0", row.get("LAN IP", ""))).strip()
-      host_val = str(row.get("Host Name", "")).strip()
+    with col2:
+      in_wan_pe = st.text_input(
+          "WAN IP PE end *",
+          value=excel_wan_pe,
+          placeholder="e.g. 172.50.83.205/30 (or plain IP)",
+      )
+      in_wan_cpe = st.text_input(
+          "WAN IP CPE *",
+          value=excel_wan_cpe,
+          placeholder="e.g. 172.50.83.206/30 (or plain IP)",
+      )
 
-      if (
-          not host_val
-          or host_val == "nan"
-          or not wan_pe_val
-          or wan_pe_val == "nan"
-      ):
-        st.warning(
-            "⚠️ This site is missing IP or Host Name details in Excel! Please"
-            " switch to the 'Manual Entry Mode' tab to enter customer-provided"
-            " IPs."
+    # Optional local contact override
+    with st.expander("Local Contact / LSI Details (from Excel)"):
+      in_contact = st.text_input(
+          "Local Contact Network Eng", value=contact_val
+      )
+      in_lsi = st.text_input("LSI No", value=lsi_val)
+
+    if st.button("⚡ Generate Configuration", type="primary"):
+      if not in_hostname or not in_wan_pe or not in_wan_cpe or not in_lan:
+        st.error(
+            "Please fill in all customer-provided fields (Host Name, WAN IP PE,"
+            " WAN IP CPE, and LAN IP)."
         )
       else:
         site_data = {
-            "host_name": host_val,
-            "site_address": str(row.get("Site Address", "")),
-            "local_contact": str(row.get("Local contact Network eng", "")),
-            "lsi_no": str(row.get("LSI No", "")),
-            "ra_no": str(row.get("RA no", "")),
-            "wan_pe": wan_pe_val,
-            "wan_cpe": wan_cpe_val,
-            "lan_ip": lan_val,
-            "bandwidth": row.get("Bandwidth (In Mbps)"),
+            "host_name": in_hostname.strip(),
+            "site_address": site_address_val,
+            "local_contact": in_contact.strip(),
+            "lsi_no": in_lsi.strip(),
+            "ra_no": ra_val,
+            "wan_pe": in_wan_pe.strip(),
+            "wan_cpe": in_wan_cpe.strip(),
+            "lan_ip": in_lan.strip(),
+            "bandwidth": bw_val,
         }
 
         try:
-          config_output, ctx = render_mpsedcl_config(site_data)
+          cfg_out, ctx = render_mpsedcl_config(site_data)
+          st.session_state["active_cfg"] = cfg_out
+          st.session_state["active_ctx"] = ctx
+          st.session_state["active_dist"] = dist_val
+          st.session_state["active_tehsil"] = tehsil_val
+          st.success("✅ Configuration generated successfully!")
+        except Exception as exc:
+          st.error(f"IP Calculation Error: {exc}. Please verify subnet format.")
 
-          c1, c2 = st.columns(2)
-          with c1:
-            st.download_button(
-                label="📥 Download Config (.txt)",
-                data=config_output,
-                file_name=f"mpsedcl_{site_data['host_name']}.txt",
-                mime="text/plain",
-                type="primary",
-                key="dl_auto",
-            )
-          with c2:
-            if st.button("🚀 Push / Update to Online Sheet", key="push_auto"):
-              payload = {
-                  "host_name": ctx["host_name"],
-                  "dist": str(row.get("Dist", "")),
-                  "tehsil": str(row.get("Tehsil/Block", "")),
-                  "wan_pe": ctx["wan_pe_raw"],
-                  "wan_cpe": ctx["wan_cpe_raw"],
-                  "lan_ip": ctx["lan_raw"],
-              }
-              push_to_online_sheet(payload)
-
-          with st.expander("📄 Preview Generated Configuration"):
-            st.code(config_output, language="cisco")
-        except Exception as err:
-          st.error(f"Error generating config: {err}")
-
-# ----------------- TAB 2: MANUAL ENTRY MODE -----------------
-with tab_manual:
-  st.subheader("Manual Site Details (Customer Provided)")
-  st.caption(
-      "Use this when the master Excel sheet does not have IPs or Hostname."
-  )
-
-  # Optional site linkage to autofill District/Tehsil/BW
-  link_site = st.checkbox(
-      "Link with an existing site from Excel (Autofills District, Tehsil,"
-      " Bandwidth)"
-  )
-  dist_val = ""
-  tehsil_val = ""
-  bw_val = "10 MBPS"
-  site_addr_val = ""
-  lsi_val = ""
-  ra_val = ""
-  contact_val = ""
-
-  if link_site:
-    site_query = st.text_input(
-        "Search Site Address to link:",
-        placeholder="e.g. MANDI_BURHANPUR",
-        key="manual_link_search",
-    )
-    if site_query:
-      m_matches = df[
-          df["Site Address"]
-          .astype(str)
-          .str.contains(site_query, case=False, na=False)
-      ]
-      if not m_matches.empty:
-        sel_link = st.selectbox(
-            "Select Site to Autofill:",
-            m_matches.index,
-            format_func=lambda i: (
-                f"{m_matches.loc[i, 'Site Address']} ({m_matches.loc[i, 'Dist']})"
-            ),
-            key="link_sel",
+    # Show download & push actions once config is generated
+    if "active_cfg" in st.session_state:
+      st.markdown("---")
+      c_down, c_push = st.columns(2)
+      with c_down:
+        st.download_button(
+            label="📥 Download Config (.txt)",
+            data=st.session_state["active_cfg"],
+            file_name=f"mpsedcl_{st.session_state['active_ctx']['host_name']}.txt",
+            mime="text/plain",
+            type="primary",
         )
-        l_row = m_matches.loc[sel_link]
-        dist_val = str(l_row.get("Dist", "")).replace("nan", "")
-        tehsil_val = str(l_row.get("Tehsil/Block", "")).replace("nan", "")
-        bw_val = str(l_row.get("Bandwidth (In Mbps)", "10 MBPS")).replace(
-            "nan", "10 MBPS"
-        )
-        site_addr_val = str(l_row.get("Site Address", "")).replace("nan", "")
-        lsi_val = str(l_row.get("LSI No", "")).replace("nan", "")
-        ra_val = str(l_row.get("RA no", "")).replace("nan", "")
-        contact_val = str(
-            l_row.get("Local contact Network eng", "")
-        ).replace("nan", "")
 
-  col_m1, col_m2 = st.columns(2)
-  with col_m1:
-    m_hostname = st.text_input(
-        "Host Name *", placeholder="e.g. AIR_MANDI_BURHANPUR"
-    )
-    m_wan_pe = st.text_input(
-        "WAN IP PE end (with CIDR) *", placeholder="e.g. 172.50.83.205/30"
-    )
-    m_wan_cpe = st.text_input(
-        "WAN IP CPE (with CIDR) *", placeholder="e.g. 172.50.83.206/30"
-    )
-    m_lan = st.text_input(
-        "LAN IP (with CIDR) *", placeholder="e.g. 172.21.159.0/27"
-    )
+      with c_push:
+        if st.button("🚀 Push / Update to Online Sheet"):
+          payload = {
+              "host_name": st.session_state["active_ctx"]["host_name"],
+              "dist": st.session_state.get("active_dist", ""),
+              "tehsil": st.session_state.get("active_tehsil", ""),
+              "wan_pe": st.session_state["active_ctx"]["wan_pe_raw"],
+              "wan_cpe": st.session_state["active_ctx"]["wan_cpe_raw"],
+              "lan_ip": st.session_state["active_ctx"]["lan_raw"],
+          }
+          push_to_online_sheet(payload)
 
-  with col_m2:
-    m_bandwidth = st.text_input(
-        "Bandwidth",
-        value=bw_val if bw_val else "10 MBPS",
-        placeholder="e.g. 10 MBPS, 50 MBPS",
-    )
-    m_site_addr = st.text_input(
-        "Site Address",
-        value=site_addr_val,
-        placeholder="e.g. MANDI_BURHANPUR",
-    )
-    m_dist = st.text_input(
-        "District", value=dist_val, placeholder="e.g. Burhanpur"
-    )
-    m_tehsil = st.text_input(
-        "Tehsil / Block", value=tehsil_val, placeholder="e.g. Burhanpur"
-    )
-
-  with st.expander("Additional Optional Fields (LSI / RA / Local Contact)"):
-    m_lsi = st.text_input("LSI No", value=lsi_val)
-    m_ra = st.text_input("RA no", value=ra_val)
-    m_contact = st.text_input("Local Contact Network Eng", value=contact_val)
-
-  if st.button("⚡ Generate Config from Manual Input", type="primary"):
-    if not m_hostname or not m_wan_pe or not m_wan_cpe or not m_lan:
-      st.error(
-          "Please fill in all mandatory fields: Host Name, WAN IP PE, WAN IP"
-          " CPE, and LAN IP."
-      )
-    else:
-      manual_data = {
-          "host_name": m_hostname.strip(),
-          "site_address": (
-              m_site_addr.strip() if m_site_addr.strip() else m_hostname.strip()
-          ),
-          "local_contact": m_contact.strip(),
-          "lsi_no": m_lsi.strip(),
-          "ra_no": m_ra.strip(),
-          "wan_pe": m_wan_pe.strip(),
-          "wan_cpe": m_wan_cpe.strip(),
-          "lan_ip": m_lan.strip(),
-          "bandwidth": m_bandwidth.strip(),
-      }
-
-      try:
-        cfg_out, manual_ctx = render_mpsedcl_config(manual_data)
-        st.session_state["manual_cfg"] = cfg_out
-        st.session_state["manual_ctx"] = manual_ctx
-        st.session_state["manual_dist"] = m_dist
-        st.session_state["manual_tehsil"] = m_tehsil
-        st.success("Config generated successfully!")
-      except Exception as exc:
-        st.error(f"Calculation Error: {exc}. Verify IP and CIDR formats.")
-
-  if "manual_cfg" in st.session_state:
-    st.divider()
-    mc1, mc2 = st.columns(2)
-    with mc1:
-      st.download_button(
-          label="📥 Download Prepared Config (.txt)",
-          data=st.session_state["manual_cfg"],
-          file_name=f"mpsedcl_{st.session_state['manual_ctx']['host_name']}.txt",
-          mime="text/plain",
-          type="primary",
-          key="dl_manual",
-      )
-    with mc2:
-      if st.button("🚀 Push / Update to Online Sheet", key="push_manual"):
-        m_payload = {
-            "host_name": st.session_state["manual_ctx"]["host_name"],
-            "dist": st.session_state.get("manual_dist", ""),
-            "tehsil": st.session_state.get("manual_tehsil", ""),
-            "wan_pe": st.session_state["manual_ctx"]["wan_pe_raw"],
-            "wan_cpe": st.session_state["manual_ctx"]["wan_cpe_raw"],
-            "lan_ip": st.session_state["manual_ctx"]["lan_raw"],
-        }
-        push_to_online_sheet(m_payload)
-
-    with st.expander("📄 Preview Generated Configuration", expanded=True):
-      st.code(st.session_state["manual_cfg"], language="cisco")
+      with st.expander("📄 Preview Generated Configuration", expanded=True):
+        st.code(st.session_state["active_cfg"], language="cisco")
