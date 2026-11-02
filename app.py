@@ -6,7 +6,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-st.set_page_config(page_title="MPSWAN Config Generator", layout="wide")
+st.set_page_config(page_title="MPSEDC Config Generator", layout="wide")
 
 # Deployed Google Apps Script Web App URL
 APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyQiZryKLGqJMRw0QlRdSwSCmJY82lYXeiblINyG-HA1LQKXBpCvdyTcmmsV_STGvqy8g/exec"
@@ -57,7 +57,7 @@ def build_config(row, template_text):
   return template.render(context), context
 
 
-st.title("⚡ MPSWAN Site Automation & Online Sync")
+st.title("⚡ MPSEDC Site Automation & Online Sync")
 
 uploaded_file = st.sidebar.file_uploader(
     "Upload Site Master Sheet (.xlsx)", type=["xlsx"]
