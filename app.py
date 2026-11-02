@@ -20,7 +20,7 @@ def parse_bandwidth_kbps(bw_val):
 
 
 def render_mpsedcl_config(data_dict):
-  """Calculates IP subnet masks, gateways, broadcast and renders MPSEDCL template."""
+  """Calculates IP subnet parameters and renders the Cisco MPSEDCL template."""
   wan_pe_raw = str(data_dict["wan_pe"]).strip()
   wan_cpe_raw = str(data_dict["wan_cpe"]).strip()
   lan_raw = str(data_dict["lan_ip"]).strip()
@@ -96,9 +96,14 @@ def render_mpsedcl_config(data_dict):
 
 def push_to_online_sheet(payload):
   """Sends row details to Google Apps Script Webhook."""
-  with st.spinner("Verifying headers and syncing to Online Google Sheet..."):
+  with st.spinner("Connecting and syncing to Google Sheet..."):
     try:
-      clean_payload = {k: str(v).strip() for k, v in payload.items() if v}
+      # Strip spaces from values before sending
+      clean_payload = {
+          k: str(v).strip()
+          for k, v in payload.items()
+          if v is not None and str(v).strip() != ""
+      }
       res = requests.post(APPS_SCRIPT_URL, json=clean_payload, timeout=20)
       if res.status_code == 200:
         try:
@@ -120,7 +125,7 @@ def push_to_online_sheet(payload):
 
 st.title("⚡ MPSWAN Site Automation & Config Generator")
 
-# Load Excel File
+# Load Master Excel File
 uploaded_file = st.sidebar.file_uploader(
     "Upload Site Master Sheet (.xlsx)", type=["xlsx"]
 )
@@ -136,10 +141,10 @@ except Exception as e:
   )
   st.stop()
 
-# 1. Search Site Address to match in Excel sheet
+# Search Site Address in Master Excel
 search_query = st.text_input(
     "🔍 Search Site Address in Excel Sheet:",
-    placeholder="e.g. MANDI_BURHANPUR, JOBAT, RAJNAGAR",
+    placeholder="e.g. ARON, MANDI_BURHANPUR, RAJNAGAR",
 )
 
 if search_query:
@@ -177,7 +182,7 @@ if search_query:
         "nan", ""
     )
 
-    # Pre-fill defaults if present in Excel, otherwise empty for customer input
+    # Pre-fill defaults if present in Excel, otherwise blank for customer input
     excel_host = str(row.get("Host Name", "")).replace("nan", "")
     excel_wan_pe = str(row.get("WAN IP PE end", "")).replace("nan", "")
     excel_wan_cpe = str(
@@ -211,24 +216,24 @@ if search_query:
               if excel_host
               else f"AIR_{site_address_val}".replace(" ", "_")
           ),
-          placeholder="e.g. AIR_MANDI_BURHANPUR",
+          placeholder="e.g. AIR_GOVT_HSS_ARON_GUNA",
       )
       in_lan = st.text_input(
           "LAN IP (with prefix/CIDR) *",
           value=excel_lan,
-          placeholder="e.g. 172.21.159.0/27 or 172.17.214.80/28",
+          placeholder="e.g. 172.17.86.80/29 or 172.21.159.0/27",
       )
 
     with col2:
       in_wan_pe = st.text_input(
           "WAN IP PE end *",
           value=excel_wan_pe,
-          placeholder="e.g. 172.50.83.205/30",
+          placeholder="e.g. 172.48.17.193/30",
       )
       in_wan_cpe = st.text_input(
           "WAN IP CPE *",
           value=excel_wan_cpe,
-          placeholder="e.g. 172.50.83.206/30",
+          placeholder="e.g. 172.48.17.194/30",
       )
 
     # Optional local contact override
@@ -261,6 +266,7 @@ if search_query:
           cfg_out, ctx = render_mpsedcl_config(site_data)
           st.session_state["active_cfg"] = cfg_out
           st.session_state["active_ctx"] = ctx
+          st.session_state["active_ra"] = ra_val
           st.session_state["active_dist"] = dist_val
           st.session_state["active_tehsil"] = tehsil_val
           st.success("✅ Configuration generated successfully!")
@@ -284,6 +290,7 @@ if search_query:
         if st.button("🚀 Push / Update to Online Sheet"):
           payload = {
               "host_name": st.session_state["active_ctx"]["host_name"],
+              "ra_no": st.session_state.get("active_ra", ""),
               "dist": st.session_state.get("active_dist", ""),
               "tehsil": st.session_state.get("active_tehsil", ""),
               "wan_pe": st.session_state["active_ctx"]["wan_pe_raw"],
