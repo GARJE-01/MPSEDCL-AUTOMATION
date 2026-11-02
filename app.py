@@ -9,7 +9,7 @@ import streamlit as st
 st.set_page_config(page_title="MPSWAN Config Automation", layout="wide")
 
 # Deployed Google Apps Script Web App URL
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyQiZryKLGqJMRw0QlRdSwSCmJY82lYXeiblINyG-HA1LQKXBpCvdyTcmmsV_STGvqy8g/exec"
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwTOMwPX41Dd1_H1vzCRij7iS2CJnKABx8znesk7AaPrE-rQwwFtXq8OLlDQQIM3YQ/exec"
 
 
 def parse_bandwidth_kbps(bw_val):
